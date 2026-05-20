@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ogopogo Triathlon — Course Maps</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <link rel="icon" href="logo.png">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.css">
+  <link rel="stylesheet" href="app.css">
+</head>
+<body>
+  <header>
+    <a href="#" class="brand">
+      <img src="logo.png" alt="Ogopogo Extreme Triathlon">
+      <div class="brand-text">
+        <strong id="brand-title">OGOPOGO TRIATHLON</strong>
+        <span>PENTICTON, BRITISH COLUMBIA</span>
+      </div>
+    </a>
+    <div class="header-controls">
+      <label class="ctrl">
+        <span>Map style</span>
+        <select id="style-select">
+          <option value="voyager">Light</option>
+          <option value="positron">Minimal</option>
+          <option value="satellite">Satellite (hybrid)</option>
+          <option value="topo">Topographic</option>
+          <option value="cyclosm">Cycling</option>
+          <option value="osm">OSM Standard</option>
+          <option value="esritopo">Esri Topographic</option>
+          <option value="shaded">Shaded Relief</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <button id="edit-toggle" class="ctrl-btn" title="Drag vertices to edit the course">
+        <span class="dot"></span> Edit course
+      </button>
+      <button id="reset-btn" class="ctrl-btn" disabled title="Restore the original course">
+        Reset
+      </button>
+      <a id="download-gpx" class="ctrl-btn" href="#" title="Download the (possibly edited) course as GPX">
+        ⬇ GPX
+      </a>
+      <label class="ctrl">
+        <span>PDF quality</span>
+        <select id="quality-select">
+          <option value="standard">Standard</option>
+          <option value="high">High</option>
+          <option value="print">Print (lossless)</option>
+        </select>
+      </label>
+      <button id="generate-pdf" class="ctrl-btn" title="Generate a PDF of the current view (live, includes edits)">⬇ PDF</button>
+      <button id="generate-all-pdfs" class="ctrl-btn" title="Generate a ZIP of PDFs for every course in the current style">⬇ All</button>
+    </div>
+  </header>
+
+  <aside id="sidebar">
+    <nav id="course-nav"></nav>
+    <div class="sidebar-foot">
+      <a href="downloads.html">Bulk PDF downloads ▸</a>
+    </div>
+  </aside>
+
+  <main>
+    <div id="stats" class="stats"></div>
+    <div id="map"></div>
+    <div id="elev-wrap">
+      <div id="elev-empty" class="elev-empty">No elevation profile for this course.</div>
+      <canvas id="elev-chart"></canvas>
+    </div>
+  </main>
+
+  <div id="toast" class="toast" hidden></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script src="https://unpkg.com/chart.js@4.4.1/dist/chart.umd.js"></script>
+  <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.18.3/dist/leaflet-geoman.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
