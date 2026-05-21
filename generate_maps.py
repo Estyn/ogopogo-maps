@@ -302,12 +302,17 @@ def draw_north_arrow(ax):
     )
 
 
-def draw_legend(ax, position="br"):
-    """Ironman-style legend, positioned in the named corner."""
+def draw_legend(ax, position="br", km_marker_interval: int = 5):
+    """Ironman-style legend, positioned in the named corner.
+
+    `km_marker_interval` is shown on the KM marker glyph so the legend matches
+    the actual spacing used on the course (5 km for shorter courses, 10 km for
+    long ones like the Extreme bike).
+    """
     legend_items = [
         ("S", START_COLOR, "START LINE"),
         ("F", FINISH_COLOR, "FINISH LINE"),
-        ("5", KM_MARKER_FILL, "KILOMETER MARKERS"),
+        (str(km_marker_interval), KM_MARKER_FILL, "KILOMETER MARKERS"),
     ]
     n = len(legend_items)
     w, h = 0.24, 0.05 + 0.045 * n
@@ -472,8 +477,8 @@ def _render_gpx_course(fig, course: Course):
     # Direction arrows, km markers, start/finish
     every_km = 4 if dist_km[-1] < 30 else 8 if dist_km[-1] < 100 else 12
     add_direction_arrows(ax, xs, ys, every_km, dist_km)
-    add_km_markers(ax, xs, ys, dist_km,
-                   every=5 if dist_km[-1] < 100 else 10)
+    km_every = 5 if dist_km[-1] < 100 else 10
+    add_km_markers(ax, xs, ys, dist_km, every=km_every)
 
     # If start and finish are within ~300 m, treat as a loop and show one combined glyph
     start_end_dist_m = math.hypot(xs[0] - xs[-1], ys[0] - ys[-1])
@@ -485,7 +490,7 @@ def _render_gpx_course(fig, course: Course):
 
     # Decorations
     draw_north_arrow(ax)
-    draw_legend(ax, position=course.legend_pos)
+    draw_legend(ax, position=course.legend_pos, km_marker_interval=km_every)
 
     # Elevation profile
     ele_ax = fig.add_axes([0.08, 0.06, 0.84, 0.12])
