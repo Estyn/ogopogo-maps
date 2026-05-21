@@ -876,7 +876,12 @@ async function buildPdfForCurrentCourse() {
     doc.text(c.race_name.toUpperCase(), 24, 10);
     doc.setFontSize(7.5);
     doc.setTextColor(240, 224, 192);
-    doc.text("T R I A T H L O N   •   P E N T I C T O N ,   B C", 24, 15.5);
+    // Derive a short, letter-spaced subtitle from the course's location:
+    //   "PENTICTON, BRITISH COLUMBIA, CANADA" -> "P E N T I C T O N ,   B C"
+    //   "APEX, BRITISH COLUMBIA, CANADA"      -> "A P E X ,   B C"
+    const city = (c.location || "").split(",")[0].trim().toUpperCase();
+    const subtitle = city.split("").join(" ") + " ,   B C";
+    doc.text(subtitle, 24, 15.5);
 
     // Title text — right
     doc.setTextColor(255, 255, 255);
@@ -972,12 +977,7 @@ async function buildPdfForCurrentCourse() {
       doc.setFontSize(10);
       doc.text(`DISTANCE: ${c.distance_label}    LOCATION: Skaha Beach, Penticton`,
                margin, y);
-      y += 5;
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(9);
-      doc.setTextColor(70, 70, 70);
-      doc.text("Open-water swim course at Skaha Beach. Yellow buoys mark the corners.",
-               margin, y);
+      // (Subtext intentionally omitted per client feedback.)
     }
 
     // ----- Footer -----
@@ -987,7 +987,7 @@ async function buildPdfForCurrentCourse() {
     const now = new Date();
     const stamp = now.toISOString().slice(0, 16).replace("T", " ");
     doc.text(
-      `© Ogopogo Extreme Triathlon  ·  Generated ${stamp}  ·  ` +
+      `© Ogopogo Extreme & Relay  ·  Generated ${stamp}  ·  ` +
       `Map: ${STYLES[state.styleKey].label}`,
       margin, H - 4
     );

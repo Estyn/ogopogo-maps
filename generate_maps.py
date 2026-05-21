@@ -73,6 +73,20 @@ def _style():
     return BASEMAP_STYLES[ACTIVE_STYLE]
 
 
+# Client-facing race names. "& Relay" is part of the Extreme branding.
+RACE_NAMES = {
+    "extreme": "Ogopogo Extreme & Relay",
+    "3500":    "Ogopogo 3500",
+}
+APEX_LOCATION      = "APEX, BRITISH COLUMBIA, CANADA"
+PENTICTON_LOCATION = "PENTICTON, BRITISH COLUMBIA, CANADA"
+
+# Swim start/finish anchor (client-supplied, 2026-05-20).
+# 49°27'10.6"N 119°35'10.4"W -> decimal degrees.
+SWIM_BEACH_LAT = 49.452944
+SWIM_BEACH_LON = -119.586222
+
+
 @dataclass
 class Course:
     key: str
@@ -80,9 +94,19 @@ class Course:
     discipline: str      # "swim" | "bike" | "run"
     title: str           # e.g. "BIKE COURSE"
     gpx: Path | None     # None for swim (synthetic)
-    distance_label: str  # e.g. "183 KILOMETERS / 1 LAP"
-    location: str = "PENTICTON, BRITISH COLUMBIA, CANADA"
+    distance_label: str  # e.g. "183.4 KILOMETERS / 1 LAP"
+    location: str = PENTICTON_LOCATION
     legend_pos: str = "bl"  # "br" (bottom-right) or "bl" (bottom-left)
+    # Client-supplied numbers that override anything computed from GPX.
+    # Used both in the matplotlib PDF stats line and in the SPA's courses.json.
+    distance_km_override: float | None = None
+    elevation_gain_override: float | None = None
+    start_elev_override: float | None = None
+    finish_elev_override: float | None = None
+    # Swim courses: which corner of the rectangle is the "start" buoy, and
+    # whether the traversal goes clockwise (reversed from the default CCW).
+    swim_start_corner: str = "NE"   # one of NE / SE / SW / NW
+    swim_reverse: bool = False
 
 
 # ---------------------------------------------------------------------------
@@ -124,26 +148,38 @@ def webmerc(lon, lat):
     return x, y
 
 
-def _swim_rectangle(beach_lat, beach_lon, long_m, short_m, rotation_deg=12):
-    """Build a rotated swim rectangle anchored at the start (NE) corner.
+def _swim_rectangle(beach_lat, beach_lon, long_m, short_m, rotation_deg=12,
+                    start_corner: str = "NE", reverse: bool = False):
+    """Build a rotated swim rectangle anchored at one named corner.
 
-    Course path (counter-clockwise) before rotation:
-      NE (start, on beach) -> SE (into lake) -> SW -> NW (back to beach) -> NE
-    The rectangle is rotated counter-clockwise by `rotation_deg` so the long
-    edge aligns with the actual shoreline (which runs slightly NW-SE).
+    Default traversal before rotation (counter-clockwise) is:
+      NE -> SE -> SW -> NW -> NE
+    `start_corner` rotates the cycle so the named corner is first; `reverse`
+    flips direction (clockwise). The rectangle is then rotated by `rotation_deg`
+    so the long edge aligns with the actual shoreline (NW-SE here).
     Returns parallel lists of lons, lats (length 5, closed polygon).
     """
+    # Rectangle corners (unrotated) anchored so the NE corner sits at
+    # (beach_lat, beach_lon). The rectangle extends south and west into the lake.
+    NE = (0.0, 0.0)
+    SE = (0.0, -short_m)
+    SW = (-long_m, -short_m)
+    NW = (-long_m, 0.0)
+    ccw = [NE, SE, SW, NW]
+    if start_corner not in ("NE", "SE", "SW", "NW"):
+        raise ValueError(f"unknown start_corner {start_corner!r}")
+    # Rotate the array so the named corner is first; geography is unchanged.
+    i = ccw.index({"NE": NE, "SE": SE, "SW": SW, "NW": NW}[start_corner])
+    cycle = ccw[i:] + ccw[:i]
+    if reverse:
+        # Keep first vertex, reverse the rest (clockwise traversal).
+        cycle = [cycle[0]] + list(reversed(cycle[1:]))
+    cycle = cycle + [cycle[0]]   # close the polygon
+
     theta = math.radians(rotation_deg)
     cos_t, sin_t = math.cos(theta), math.sin(theta)
-    local = [
-        (0.0, 0.0),                   # NE, start
-        (0.0, -short_m),              # SE
-        (-long_m, -short_m),          # SW
-        (-long_m, 0.0),               # NW
-        (0.0, 0.0),                   # close
-    ]
     rotated = [
-        (x * cos_t - y * sin_t, x * sin_t + y * cos_t) for x, y in local
+        (x * cos_t - y * sin_t, x * sin_t + y * cos_t) for x, y in cycle
     ]
     deg_per_m_lat = 1.0 / 110540.0
     deg_per_m_lon = 1.0 / (111320.0 * math.cos(math.radians(beach_lat)))
@@ -271,7 +307,6 @@ def draw_legend(ax, position="br"):
     legend_items = [
         ("S", START_COLOR, "START LINE"),
         ("F", FINISH_COLOR, "FINISH LINE"),
-        ("T", TRANSITION_COLOR, "TRANSITION AREA"),
         ("5", KM_MARKER_FILL, "KILOMETER MARKERS"),
     ]
     n = len(legend_items)
@@ -335,7 +370,11 @@ def draw_header(fig, race_name: str, course_title: str, distance_label: str,
     band.text(text_x, 0.62, race_name,
               color="white", fontsize=18, fontweight="bold",
               ha="left", va="center")
-    band.text(text_x, 0.24, "T R I A T H L O N   •   P E N T I C T O N ,   B C",
+    # Letter-spaced subtitle derived from the course's location (e.g.
+    # "P E N T I C T O N ,   B C" or "A P E X ,   B C"). No more "TRIATHLON".
+    city = (location or "").split(",")[0].strip().upper()
+    subtitle = " ".join(city) + " ,   B C"
+    band.text(text_x, 0.24, subtitle,
               color=ACCENT_COLOR, fontsize=8.5, fontweight="bold",
               ha="left", va="center")
 
@@ -355,7 +394,7 @@ def draw_header(fig, race_name: str, course_title: str, distance_label: str,
         s.set_visible(False)
 
 
-def draw_footer(fig, text="© Ogopogo Extreme Triathlon. All rights reserved."):
+def draw_footer(fig, text="© Ogopogo Extreme & Relay. All rights reserved."):
     foot = fig.add_axes([0, 0, 1, 0.02])
     foot.set_xticks([]); foot.set_yticks([])
     foot.set_facecolor("#eeeeee")
@@ -374,8 +413,7 @@ def render_course_map(course: Course, out_pdf: Path):
 
     # header / footer
     draw_header(fig,
-                race_name=("OGOPOGO EXTREME" if course.race == "extreme"
-                           else "OGOPOGO 3500"),
+                race_name=RACE_NAMES[course.race].upper(),
                 course_title=course.title,
                 distance_label=course.distance_label,
                 location=course.location)
@@ -464,21 +502,25 @@ def _render_gpx_course(fig, course: Course):
         s.set_edgecolor("#cccccc")
     ele_ax.grid(True, linestyle=":", color="#cccccc", linewidth=0.5)
 
-    # Stats line above elevation
-    gain = float(np.sum(np.clip(np.diff(eles), 0, None)))
-    stats = (f"DISTANCE: {dist_km[-1]:.1f} km    "
-             f"ELEVATION GAIN: {gain:,.0f} m    "
-             f"START ELEV: {eles[0]:.0f} m    "
-             f"FINISH ELEV: {eles[-1]:.0f} m")
+    # Stats line above elevation. Client-supplied overrides win over GPX-derived
+    # values when present (race numbers are tuned to match Garmin-measured laps).
+    gain_calc = float(np.sum(np.clip(np.diff(eles), 0, None)))
+    dist_val   = course.distance_km_override if course.distance_km_override is not None else dist_km[-1]
+    gain_val   = course.elevation_gain_override if course.elevation_gain_override is not None else gain_calc
+    start_val  = course.start_elev_override if course.start_elev_override is not None else eles[0]
+    finish_val = course.finish_elev_override if course.finish_elev_override is not None else eles[-1]
+    stats = (f"DISTANCE: {dist_val:.1f} km    "
+             f"ELEVATION GAIN: {gain_val:,.0f} m    "
+             f"START ELEV: {start_val:.0f} m    "
+             f"FINISH ELEV: {finish_val:.0f} m")
     fig.text(0.08, 0.195, stats, fontsize=9, color="#222",
              fontweight="bold", ha="left", va="bottom")
 
 
 def _render_swim(fig, course: Course):
     """Skaha Beach swim — rectangle starting at the beach, extending into lake."""
-    # Skaha Beach, Penticton (north shore of Skaha Lake — east end of the
-    # public beach where the shoreline runs roughly east–west).
-    beach_lat, beach_lon = 49.4527, -119.5821
+    # Start/finish anchor on Skaha Beach (north shore of Skaha Lake).
+    beach_lat, beach_lon = SWIM_BEACH_LAT, SWIM_BEACH_LON
     # Long side runs roughly along the shoreline (rotated to match Skaha
     # Beach's actual NW–SE orientation); short side reaches into the lake.
     if course.race == "extreme":
@@ -489,15 +531,32 @@ def _render_swim(fig, course: Course):
         laps = 1
     rect_lons, rect_lats = _swim_rectangle(beach_lat, beach_lon,
                                            rect_long_m, rect_short_m,
-                                           rotation_deg=12)
+                                           rotation_deg=12,
+                                           start_corner=course.swim_start_corner,
+                                           reverse=course.swim_reverse)
     xs, ys = webmerc(np.asarray(rect_lons), np.asarray(rect_lats))
 
     ax = fig.add_axes([0.04, 0.22, 0.92, 0.70])
     style = _style()
 
-    # No course lines drawn — the swim is provided as a blank basemap so the
-    # course can be added by hand. Bounds are still framed around the
-    # intended swim area off Skaha Beach.
+    # Draw the swim course rectangle (polyline + yellow corner buoys + S marker).
+    # Outline halo for visibility on satellite imagery.
+    if style["route_outline"]:
+        ax.plot(xs, ys, color=style["route_outline"],
+                linewidth=style["route_lw"] + 2.2,
+                solid_capstyle="round", zorder=3)
+    ax.plot(xs, ys, color=style["route_color"],
+            linewidth=style["route_lw"], solid_capstyle="round", zorder=4)
+    # Yellow buoy at each corner (skip the closing repeat of the start).
+    for i in range(len(xs) - 1):
+        ax.scatter([xs[i]], [ys[i]], s=160, marker="o",
+                   facecolor="#FFD400", edgecolor=ROUTE_COLOR,
+                   linewidth=1.6, zorder=6)
+    # Start glyph at the first vertex. Nudge upshore so it doesn't sit on top
+    # of its buoy (the SPA renders the S directly on the buoy; here we offset).
+    sx, sy = float(xs[0]), float(ys[0])
+    add_endpoint(ax, sx, sy, "START")
+
     xmin, xmax = xs.min() - 700, xs.max() + 700
     ymin, ymax = ys.min() - 700, ys.max() + 700
     ax.set_xlim(xmin, xmax)
@@ -520,10 +579,7 @@ def _render_swim(fig, course: Course):
              f"DISTANCE: {course.distance_label}    LAPS: {laps}    "
              f"LOCATION: Skaha Beach, Penticton",
              fontsize=10, color="#222", fontweight="bold")
-    fig.text(0.08, 0.10,
-             "Open-water swim at Skaha Beach. Course to be marked on this map "
-             "by hand.",
-             fontsize=9, color="#444")
+    # (Subtext "Open-water swim at Skaha Beach..." removed per client.)
 
 
 # ---------------------------------------------------------------------------
@@ -585,7 +641,7 @@ def render_course_html(course: Course, out_html: Path):
 
     fit_pts = []
     if course.discipline == "swim":
-        beach_lat, beach_lon = 49.4527, -119.5821
+        beach_lat, beach_lon = SWIM_BEACH_LAT, SWIM_BEACH_LON
         fit_pts = [(beach_lat + 0.004, beach_lon - 0.010),
                    (beach_lat - 0.012, beach_lon + 0.004)]
     else:
@@ -606,20 +662,20 @@ def export_app_data(courses, out: Path):
     order = []
     for c in courses:
         order.append(c.key)
-        race_name = "Ogopogo Extreme" if c.race == "extreme" else "Ogopogo 3500"
         entry = {
             "key": c.key,
             "race": c.race,
-            "race_name": race_name,
+            "race_name": RACE_NAMES[c.race],
             "discipline": c.discipline,
             "title": c.title,
             "distance_label": c.distance_label,
             "location": c.location,
         }
         if c.discipline == "swim":
-            beach_lat, beach_lon = 49.4527, -119.5821
-            lons, lats = _swim_rectangle(beach_lat, beach_lon,
-                                         750, 200, rotation_deg=12)
+            beach_lat, beach_lon = SWIM_BEACH_LAT, SWIM_BEACH_LON
+            lons, lats = _swim_rectangle(
+                beach_lat, beach_lon, 750, 200, rotation_deg=12,
+                start_corner=c.swim_start_corner, reverse=c.swim_reverse)
             entry.update({
                 "swim": True,
                 "beach": {"lat": beach_lat, "lon": beach_lon},
@@ -636,13 +692,21 @@ def export_app_data(courses, out: Path):
             idx = list(range(0, n, step))
             if idx[-1] != n - 1:
                 idx.append(n - 1)
-            gain = float(np.sum(np.clip(np.diff(eles), 0, None)))
+            gain_calc = float(np.sum(np.clip(np.diff(eles), 0, None)))
             entry.update({
                 "swim": False,
-                "distance_km": round(float(dist[-1]), 2),
-                "elevation_gain_m": round(gain, 0),
-                "start_elev_m": round(float(eles[0]), 0),
-                "finish_elev_m": round(float(eles[-1]), 0),
+                "distance_km": (c.distance_km_override
+                                if c.distance_km_override is not None
+                                else round(float(dist[-1]), 2)),
+                "elevation_gain_m": (c.elevation_gain_override
+                                     if c.elevation_gain_override is not None
+                                     else round(gain_calc, 0)),
+                "start_elev_m": (c.start_elev_override
+                                 if c.start_elev_override is not None
+                                 else round(float(eles[0]), 0)),
+                "finish_elev_m": (c.finish_elev_override
+                                  if c.finish_elev_override is not None
+                                  else round(float(eles[-1]), 0)),
                 "track": [
                     {
                         "lat": round(float(lats[i]), 6),
@@ -669,37 +733,44 @@ def main():
     out.mkdir(exist_ok=True)
 
     courses = [
+        # Swim start/finish at client-supplied anchor (49°27'10.6"N, 119°35'10.4"W).
+        # Same NE corner + clockwise traversal for both swims; the only difference
+        # is the lap count.
         Course("extreme_swim", "extreme", "swim", "SWIM COURSE", None,
-               "3.8 KILOMETERS / 2 LAPS"),
+               "3.8 KILOMETERS / 2 LAPS",
+               swim_start_corner="NE", swim_reverse=True),
+        # Extreme bike: Garmin-measured distance/gain, finish at Apex (1840 m).
         Course("extreme_bike", "extreme", "bike", "BIKE COURSE",
                here / "Ogopogo Extreme & Relay.gpx",
-               "183 KILOMETERS / 1 LAP"),
+               "183.4 KILOMETERS / 1 LAP",
+               distance_km_override=183.4,
+               elevation_gain_override=3100,
+               finish_elev_override=1840),
+        # Extreme run: a single Apex lap, no longer a marathon label.
         Course("extreme_run", "extreme", "run", "RUN COURSE",
                here / "Ogopogo Extreme & Relay Run Course.gpx",
-               "MARATHON / 1 LAP"),
+               "42.2 KILOMETERS  •  1 LAP",
+               location=APEX_LOCATION,
+               elevation_gain_override=1954,
+               start_elev_override=1840,
+               finish_elev_override=1840),
         Course("og3500_swim", "3500", "swim", "SWIM COURSE", None,
-               "1.9 KILOMETERS / 1 LAP"),
+               "1.9 KILOMETERS / 1 LAP",
+               swim_start_corner="NE", swim_reverse=True),
         Course("og3500_bike", "3500", "bike", "BIKE COURSE",
                here / "Ogopogo 3500.gpx",
-               "83 KILOMETERS / 1 LAP"),
+               "83.3 KILOMETERS / 1 LAP",
+               distance_km_override=83.3,
+               elevation_gain_override=2161,
+               finish_elev_override=1840),
         Course("og3500_run", "3500", "run", "RUN COURSE",
                here / "Ogopogo 3500 Run Course.gpx",
-               "HALF MARATHON / 1 LAP"),
+               "25.1 KILOMETERS  •  1 LAP",
+               location=APEX_LOCATION,
+               elevation_gain_override=1369,
+               start_elev_override=1840,
+               finish_elev_override=1840),
     ]
-
-    # First pass — compute true distances from GPX where available, update labels
-    for c in courses:
-        if c.gpx and c.gpx.exists():
-            _, _, _, dist = parse_gpx(c.gpx)
-            total = dist[-1]
-            if c.discipline == "bike":
-                c.distance_label = f"{total:.1f} KILOMETERS / 1 LAP"
-            elif c.discipline == "run":
-                # Detect half vs full marathon-ish
-                if total < 25:
-                    c.distance_label = f"{total:.1f} KILOMETERS  •  HALF MARATHON"
-                else:
-                    c.distance_label = f"{total:.1f} KILOMETERS  •  MARATHON"
 
     # Render each course in both PDF styles (light + satellite). The HTML
     # version is no longer per-course; everything is served by the SPA.
